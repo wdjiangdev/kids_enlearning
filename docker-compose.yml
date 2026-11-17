@@ -1,0 +1,12 @@
+services:
+  kids-en:
+    build: .
+    container_name: kids-en
+    restart: unless-stopped
+    ports: ["127.0.0.1:18097:8000"]
+    environment:
+      - REGISTER_CODE=${REGISTER_CODE}
+    volumes:
+      - ./data:/data
+      - ./media:/media:ro
+    mem_limit: 256m
