@@ -163,9 +163,9 @@ function distract(w, pool, n, f = x => x.en, avoid = null) {
 function makeWordQ(w, pool, low, kind) {
   kind = kind || pick(wordKinds(w, pool, low), 1)[0];
   if (kind === 'pic2word') { const o = shuffle([w, ...distract(w, pool, 3, x => x.en, x => confusable(w, x))]); return { kind, w, opts: o.map(x => ({ t: x.en, ok: x.key === w.key })) }; }
-  if (kind === 'zh2en') { const o = shuffle([w, ...distract(w, pool, 3)]); return { kind, w, opts: o.map(x => ({ t: x.en, ok: x.key === w.key })) }; }
+  if (kind === 'zh2en') { const o = shuffle([w, ...distract(w, pool, 3, x => x.en, x => confusable(w, x))]); return { kind, w, opts: o.map(x => ({ t: x.en, ok: x.key === w.key })) }; }
   if (kind === 'listen2pic') { const o = shuffle([w, ...distract(w, pool.filter(x => x.img), 3, x => x.en, x => confusable(w, x))]); return { kind, w, opts: o.map(x => ({ img: imgOf(x), t: x.en, ok: x.key === w.key })) }; }
-  if (kind === 'en2zh') { const o = shuffle([w, ...distract(w, pool, low ? 2 : 3, x => x.zh)]); return { kind, w, opts: o.map(x => ({ t: x.zh, ok: x.key === w.key, zh: 1 })) }; }
+  if (kind === 'en2zh') { const o = shuffle([w, ...distract(w, pool, low ? 2 : 3, x => x.zh, x => confusable(w, x))]); return { kind, w, opts: o.map(x => ({ t: x.zh, ok: x.key === w.key, zh: 1 })) }; }
   if (kind === 'spell') { const word = w.en.replace(/[.!?]$/, ''); return { kind, w, answer: word, tiles: shuffle(word.split('')) }; }
 }
 function usableSents(u) { return (u.sents || []).filter(s => { const n = s.en.split(/\s+/).length; return n >= 2 && n <= 12 && !/[“”"]|\.\.\.|…|\//.test(s.en); }); }
@@ -176,7 +176,7 @@ function makeSentQ(u, s, allS, kind) {
   const ks = ['order', 'listenSent']; if (cand.length) ks.push('fill');
   kind = kind || pick(ks, 1)[0];
   if (kind === 'order') return { kind, u, s, answer: toks.join(' '), tiles: shuffle(toks) };
-  if (kind === 'listenSent') { const o = shuffle([s, ...distract(s, allS, 2, x => x.zh)]); return { kind, u, s, opts: o.map(x => ({ t: x.zh, zh: 1, ok: x === s })) }; }
+  if (kind === 'listenSent') { const zn = t => (t || '').replace(/[。！？；：、,.!?;:\s（）()]/g, ''); const o = shuffle([s, ...distract(s, allS, 2, x => zn(x.zh), x => zn(x.zh) === zn(s.zh) || zn(x.en) === zn(s.en))]); return { kind, u, s, opts: o.map(x => ({ t: x.zh, zh: 1, ok: x === s })) }; }
   if (kind === 'fill') {
     const [i, t] = pick(cand, 1)[0]; const others = pick([...new Set(words.filter(x => x.toLowerCase() !== t.toLowerCase()))], 2);
     const blank = toks.map((x, j) => j === i ? x.replace(t, '____') : x).join(' ');
