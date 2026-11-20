@@ -1,4 +1,4 @@
-const V='kids-v15';
+const V='kids-v16';
 const SHELL=['./','index.html','assets/app.css','assets/app.js','data/index.json','data/grammar.json','manifest.webmanifest','assets/icon.svg'];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(V).then(c=>c.addAll(SHELL)));self.skipWaiting();});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==V&&k!=='kids-media').map(k=>caches.delete(k)))));self.clients.claim();});

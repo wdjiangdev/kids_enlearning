@@ -136,16 +136,35 @@ function wordKinds(w, pool, low) {
   if (!low) { k.push('zh2en'); if (isWord(w) && w.en.length <= 11 && w.en.length >= 2) k.push('spell', 'spell'); }
   return k;
 }
-function distract(w, pool, n, f = x => x.en) {
+/* 易混判断：两个词不能同题出现——互为包含（morning / Good morning!）、同一张图、词族同根（sun / sunny、moon / mooncake）、中文同义（Hello. / Hi. 都是「你好。」、goodbye / bye 都是「再见」） */
+function confusable(a, b) {
+  if (!a || !b || a.key === undefined || b.key === undefined) return false;
+  if (a.key === b.key) return true;
+  const ia = a.im || a.id, ib = b.im || b.id;
+  if (ia !== undefined && ib !== undefined && String(ia) === String(ib)) return true; // 同一张配图
+  const zhN = s => (s || '').replace(/[。！？；：、,.!?;:\s（）()]/g, '');
+  const za = zhN(a.zh), zb = zhN(b.zh);
+  if (za && za === zb) return true; // 中文释义完全相同
+  const pa = (a.zh || '').split(/[；;，,、]/).map(zhN).filter(Boolean), pb = (b.zh || '').split(/[；;，,、]/).map(zhN).filter(Boolean);
+  if (pa.length && pb.length && pa[0] === pb[0]) return true; // 中文首义相同，如「你好」/「再见」
+  if (pa.some(x => x.length >= 2 && pb.includes(x))) return true; // 任一中文义项相同，如 sweep / clean 都有「打扫」
+  const A = new Set(a.key.split(' ').filter(Boolean)), B = new Set(b.key.split(' ').filter(Boolean));
+  if (!A.size || !B.size) return false;
+  if ([...A].every(t => B.has(t)) || [...B].every(t => A.has(t))) return true; // 短语包含单词，如 evening ⊂ good evening
+  for (const x of A) for (const y of B) if (x.length >= 3 && y.length >= 3 && x !== y && (y.startsWith(x) || x.startsWith(y))) return true; // 同根词族
+  return false;
+}
+function distract(w, pool, n, f = x => x.en, avoid = null) {
   const seen = new Set([f(w).toLowerCase()]); const out = [];
   const near = pool.filter(x => x.unit && x.unit === w.unit), far = pool.filter(x => !(x.unit && x.unit === w.unit));
-  for (const x of [...shuffle(near), ...shuffle(far)]) { const v = f(x); if (!v || seen.has(v.toLowerCase())) continue; seen.add(v.toLowerCase()); out.push(x); if (out.length >= n) break; }
+  for (const x of [...shuffle(near), ...shuffle(far)]) { const v = f(x); if (!v || seen.has(v.toLowerCase())) continue; if (avoid && avoid(x)) continue; seen.add(v.toLowerCase()); out.push(x); if (out.length >= n) break; }
   return out;
 }
 function makeWordQ(w, pool, low, kind) {
   kind = kind || pick(wordKinds(w, pool, low), 1)[0];
-  if (kind === 'pic2word' || kind === 'zh2en') { const o = shuffle([w, ...distract(w, pool, 3)]); return { kind, w, opts: o.map(x => ({ t: x.en, ok: x.key === w.key })) }; }
-  if (kind === 'listen2pic') { const o = shuffle([w, ...distract(w, pool.filter(x => x.img), 3)]); return { kind, w, opts: o.map(x => ({ img: imgOf(x), t: x.en, ok: x.key === w.key })) }; }
+  if (kind === 'pic2word') { const o = shuffle([w, ...distract(w, pool, 3, x => x.en, x => confusable(w, x))]); return { kind, w, opts: o.map(x => ({ t: x.en, ok: x.key === w.key })) }; }
+  if (kind === 'zh2en') { const o = shuffle([w, ...distract(w, pool, 3)]); return { kind, w, opts: o.map(x => ({ t: x.en, ok: x.key === w.key })) }; }
+  if (kind === 'listen2pic') { const o = shuffle([w, ...distract(w, pool.filter(x => x.img), 3, x => x.en, x => confusable(w, x))]); return { kind, w, opts: o.map(x => ({ img: imgOf(x), t: x.en, ok: x.key === w.key })) }; }
   if (kind === 'en2zh') { const o = shuffle([w, ...distract(w, pool, low ? 2 : 3, x => x.zh)]); return { kind, w, opts: o.map(x => ({ t: x.zh, ok: x.key === w.key, zh: 1 })) }; }
   if (kind === 'spell') { const word = w.en.replace(/[.!?]$/, ''); return { kind, w, answer: word, tiles: shuffle(word.split('')) }; }
 }
@@ -229,12 +248,18 @@ function playDing() { try { ac = ac || new (window.AudioContext || window.webkit
 
 function runQuiz(box, qs, opts = {}) {
   let i = 0, right = 0;
+  let backTo = null; // 回看模式：backTo 是离开时的题号，回看重答不计星、不回调、不重排队，看完自动回到该题
   const step = () => {
     if (i >= qs.length) return end();
-    box.innerHTML = `<div class="quiz"><div class="qtop"><button class="btn ghost sm" data-quit>✖</button><div class="qbar"><span style="width:${i / qs.length * 100}%"></span></div><span class="qstars">⭐ ${right}</span></div><div data-q></div></div>`;
+    const reviewing = backTo !== null;
+    box.innerHTML = `<div class="quiz"><div class="qtop"><button class="btn ghost sm" data-quit>✖</button><button class="btn ghost sm" data-prev ${i > 0 && !reviewing ? '' : 'disabled'}>⬅️ 上一题</button><div class="qbar"><span style="width:${i / qs.length * 100}%"></span></div><span class="qstars">⭐ ${right}</span></div>${reviewing ? '<p class="note" style="margin:0 0 8px">↩️ 正在回看上一题，再答一次不计星星，看完点「下一题」回到刚才那题。</p>' : ''}<div data-q></div></div>`;
     $('[data-quit]', box).onclick = () => opts.onQuit ? opts.onQuit() : history.back();
+    const pv = $('[data-prev]', box); if (pv) pv.onclick = () => { if (!i || reviewing) return; backTo = i; i--; step(); };
     const q = qs[i];
-    renderQ($('[data-q]', box), q.q || q, ok => { if (ok) { right++; addStar(); } opts.onAnswer && opts.onAnswer(q, ok); if (!ok && opts.requeue) qs.push(opts.requeue(q)); i++; step(); });
+    renderQ($('[data-q]', box), q.q || q, ok => {
+      if (reviewing) { i = backTo; backTo = null; step(); return; }
+      if (ok) { right++; addStar(); } opts.onAnswer && opts.onAnswer(q, ok); if (!ok && opts.requeue) qs.push(opts.requeue(q)); i++; step();
+    });
   };
   const end = () => {
     stopAudio(); const pct = right / Math.max(1, qs.length); if (pct >= .6) confetti();
@@ -495,8 +520,8 @@ function startReview(words) {
   const learn = (k, done) => {
     if (k >= fresh.length) return done();
     const w = fresh[k];
-    box.innerHTML = `<div class="flash"><div class="crumbs">🆕 认识新单词 ${k + 1} / ${fresh.length}</div><div class="big">${w.img ? `<img src="${imgOf(w)}" alt="">` : `<div style="font-size:90px">🔤</div>`}<div class="en">${esc(w.en)}</div><div class="ipa">${esc(w.ipa || '')}</div><div class="zh">${esc(w.zh)}</div><div class="muted" style="margin-top:6px">${w.book} · ${w.unit.split('-')[1]}</div></div><div class="ctrl"><button class="btn" id="sp">🔊 再听</button><button class="btn orange" id="nx">记住了 ➡️</button></div></div>`;
-    playWord(w); $('#sp').onclick = () => playWord(w); $('#nx').onclick = () => learn(k + 1, done);
+    box.innerHTML = `<div class="flash"><div class="crumbs">🆕 认识新单词 ${k + 1} / ${fresh.length}</div><div class="big">${w.img ? `<img src="${imgOf(w)}" alt="">` : `<div style="font-size:90px">🔤</div>`}<div class="en">${esc(w.en)}</div><div class="ipa">${esc(w.ipa || '')}</div><div class="zh">${esc(w.zh)}</div><div class="muted" style="margin-top:6px">${w.book} · ${w.unit.split('-')[1]}</div></div><div class="ctrl"><button class="btn ghost" id="pv" ${k ? '' : 'disabled'}>⬅️ 上一个</button><button class="btn" id="sp">🔊 再听</button><button class="btn orange" id="nx">记住了 ➡️</button></div></div>`;
+    playWord(w); $('#sp').onclick = () => playWord(w); if ($('#pv')) $('#pv').onclick = () => { if (k > 0) learn(k - 1, done); }; $('#nx').onclick = () => learn(k + 1, done);
   };
   const pool = uniq.length >= 6 ? uniq : uniq.concat(Object.values(S.books).flatMap(b => b.units.flatMap(u => u.words)));
   const kindFor = w => { if (S.set.types === 'easy') return pick(wordKinds(w, pool, true), 1)[0]; if (S.set.types === 'all') return pick(wordKinds(w, pool, false), 1)[0]; return undefined; };
