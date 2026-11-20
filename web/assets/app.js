@@ -39,7 +39,7 @@ const unum = n => n === 0 ? '👋' : n;
 const ulab = u => /^PP/.test(u.id) ? `第${u.no}集` : u.no ? 'Unit ' + u.no : 'Hello';
 
 /* ---------- 声音 ---------- */
-const player = new Audio(); let stopTimer = null, playingEl = null;
+const player = new Audio(); let stopTimer = null, playingEl = null, playSeq = 0; // playSeq：播放序号，被新播放打断的旧 play() 失败回调不再补 TTS，避免两个声音叠读
 function stopAudio() { player.pause(); clearTimeout(stopTimer); if (playingEl) playingEl.classList.remove('playing'); playingEl = null; speechSynthesis?.cancel(); }
 function tts(text, rate = .85, us = false) {
   if (!window.speechSynthesis) return;
@@ -50,14 +50,14 @@ function tts(text, rate = .85, us = false) {
 }
 function playWord(w, el) {
   stopAudio(); if (el) { el.classList.add('playing'); playingEl = el; }
-  if (w.au) { player.src = `media/au/${w.id}.mp3${w.au > 1 ? '?v=' + w.au : ''}`; player.currentTime = 0; player.play().catch(() => tts(w.en, .85, w.us)); player.onended = () => el && el.classList.remove('playing'); }
+  if (w.au) { player.src = `media/au/${w.id}.mp3${w.au > 1 ? '?v=' + w.au : ''}`; player.currentTime = 0; const seq = ++playSeq; player.play().catch(e => { if (seq === playSeq && (!e || e.name !== 'AbortError')) tts(w.en, .85, w.us); }); player.onended = () => el && el.classList.remove('playing'); }
   else { tts(w.en, .85, w.us); setTimeout(() => el && el.classList.remove('playing'), 1200); }
 }
 function playSent(u, s, el) {
   stopAudio(); if (el) { el.classList.add('playing'); playingEl = el; }
   if (u.la && s.t && s.t[1] > s.t[0]) {
     const src = `media/lesson/${u.id}.mp3`;
-    const go = () => { player.currentTime = s.t[0] / 1000; player.play().catch(() => tts(s.en)); stopTimer = setTimeout(() => { player.pause(); el && el.classList.remove('playing'); }, s.t[1] - s.t[0] + 150); };
+    const go = () => { player.currentTime = s.t[0] / 1000; const seq = ++playSeq; player.play().catch(e => { if (seq === playSeq && (!e || e.name !== 'AbortError')) tts(s.en); }); stopTimer = setTimeout(() => { player.pause(); el && el.classList.remove('playing'); }, s.t[1] - s.t[0] + 150); };
     if (!player.src.endsWith(src)) { player.src = src; player.onloadedmetadata = () => { player.onloadedmetadata = null; go(); }; player.load(); } else go();
     player.onended = null;
   } else { tts(s.en, .85, s.us); setTimeout(() => el && el.classList.remove('playing'), 2000); }
@@ -365,7 +365,7 @@ route(/^\/unit\/([\w-]+)$/, async (m, p) => {
 
 
 /* 国际音标 */
-function exPlay(e, el) { stopAudio(); if (el) { el.classList.add('playing'); playingEl = el; } if (e.au) { player.src = `media/au/${e.au}.mp3`; player.play().catch(() => tts(e.en)); player.onended = () => el && el.classList.remove('playing'); } else { tts(e.en, .8); setTimeout(() => el && el.classList.remove('playing'), 1200); } }
+function exPlay(e, el) { stopAudio(); if (el) { el.classList.add('playing'); playingEl = el; } if (e.au) { player.src = `media/au/${e.au}.mp3`; const seq = ++playSeq; player.play().catch(err => { if (seq === playSeq && (!err || err.name !== 'AbortError')) tts(e.en); }); player.onended = () => el && el.classList.remove('playing'); } else { tts(e.en, .8); setTimeout(() => el && el.classList.remove('playing'), 1200); } }
 function phoPlay(x, el) { stopAudio(); if (el) { el.classList.add('playing'); playingEl = el; } if (!x.au) return; player.src = `media/ipa/${x.au}`; player.play().catch(() => {}); player.onended = () => el && el.classList.remove('playing'); }
 const ipaHL = (ipa, s) => { ipa = ipa || ''; const k = ipa.indexOf(s); return k < 0 ? esc(ipa) : esc(ipa.slice(0, k)) + '<b>' + esc(s) + '</b>' + esc(ipa.slice(k + s.length)); };
 const IPA_G = [['单元音', [['长元音', /^单元音·长/], ['短元音', /^单元音·短/]], '#ff6b6b'], ['双元音', [['', /^双元音/]], '#ffa94d'], ['辅音', [['清辅音', /^辅音·清/], ['浊辅音', /^辅音·(浊|鼻音|舌侧|半元音)/]], '#4dabf7']];
